@@ -1,8 +1,20 @@
+const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+    res.send("🌸 HOUSE OF BHASHI BOT RUNNING 🌸");
+});
+
+app.listen(PORT, () => {
+    console.log("Web server running on port " + PORT);
+});
+
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const P = require("pino");
-const qrcode = require("qrcode-terminal");
 const fs = require("fs");
 const path = require("path");
+const readline = require("readline");
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("./session");
@@ -17,24 +29,25 @@ async function startBot() {
     sock.ev.on("creds.update", saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
-        const { connection, qr } = update;
-
-        // 🔥 PRINT QR MANUALLY
-        if (qr) {
-            console.log("\n🌸 HOUSE OF BHASHI QR CODE 🌸\n");
-            qrcode.generate(qr, { small: true });
-        }
+        const { connection } = update;
 
         if (connection === "open") {
             console.log("✅ HOUSE OF BHASHI BOT CONNECTED!");
-            console.log("👑 OWNER: ✠ KG84࿐");
-        }
-
-        if (connection === "close") {
-            console.log("❌ Connection closed. Reconnecting...");
-            startBot();
         }
     });
+
+    if (!sock.authState.creds.registered) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        rl.question("Enter your WhatsApp number (947XXXXXXXX): ", async (number) => {
+            const code = await sock.requestPairingCode(number);
+            console.log("Your Pairing Code:", code);
+            rl.close();
+        });
+    }
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
@@ -44,12 +57,6 @@ async function startBot() {
         const imagePath = path.join(__dirname, "media", "menu.jpg");
 
         if (text === ".menu") {
-            if (!fs.existsSync(imagePath)) {
-                return sock.sendMessage(msg.key.remoteJid, {
-                    text: "⚠ Menu image not found in media folder!"
-                });
-            }
-
             await sock.sendMessage(msg.key.remoteJid, {
                 image: fs.readFileSync(imagePath),
                 caption: `
