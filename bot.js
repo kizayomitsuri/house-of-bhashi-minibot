@@ -10,50 +10,74 @@ app.listen(PORT, () => {
     console.log("Web server running on port " + PORT);
 });
 
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    fetchLatestBaileysVersion,
+    DisconnectReason
+} = require("@whiskeysockets/baileys");
+
 const P = require("pino");
 const fs = require("fs");
 const path = require("path");
-const readline = require("readline");
 
 async function startBot() {
+
     const { state, saveCreds } = await useMultiFileAuthState("./session");
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
         logger: P({ level: "silent" }),
-        auth: state
+        auth: state,
+        browser: ["HOUSE OF BHASHI", "Chrome", "1.0"]
     });
 
+    // 🔐 Save session
     sock.ev.on("creds.update", saveCreds);
 
+    // 📱 Generate Pairing Code (ONLY first time)
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode("94788806757");
+                console.log("📱 Your Pairing Code:", code);
+                console.log("👉 Go to WhatsApp → Linked Devices → Link with phone number");
+            } catch (e) {
+                console.log("Pairing failed:", e.message);
+            }
+        }, 6000);
+    }
+
+    // 🔄 Connection Handling
     sock.ev.on("connection.update", async (update) => {
-        const { connection } = update;
+        const { connection, lastDisconnect } = update;
 
         if (connection === "open") {
             console.log("✅ HOUSE OF BHASHI BOT CONNECTED!");
         }
+
+        if (connection === "close") {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+
+            if (statusCode !== DisconnectReason.loggedOut) {
+                console.log("🔁 Reconnecting...");
+                startBot();
+            } else {
+                console.log("❌ Logged Out. Delete session folder and restart.");
+            }
+        }
     });
 
-    if (!sock.authState.creds.registered) {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        rl.question("Enter your WhatsApp number (947XXXXXXXX): ", async (number) => {
-            const code = await sock.requestPairingCode(number);
-            console.log("Your Pairing Code:", code);
-            rl.close();
-        });
-    }
-
+    // 📩 Message Listener
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text;
+
         const imagePath = path.join(__dirname, "media", "menu.jpg");
 
         if (text === ".menu") {
